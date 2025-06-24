@@ -8,6 +8,7 @@ from os import environ
 from pyromod import listen
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from pyrogram.types.messages_and_media import message
 from pyrogram.errors import FloodWait
 from aiohttp import web
 
