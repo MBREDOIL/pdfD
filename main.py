@@ -12,12 +12,11 @@ from pyrogram.types.messages_and_media import message
 from pyrogram.errors import FloodWait
 from aiohttp import web
 
-# Get environment variables directly
+# Get environment variables
 API_ID = int(os.getenv("API_ID", "22182189"))
 API_HASH = os.getenv("API_HASH", "5e7c4088f8e23d0ab61e29ae11960bf5")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
-# Validate environment variables
 if not BOT_TOKEN:
     print("BOT_TOKEN environment variable is not set!")
     sys.exit(1)
@@ -60,38 +59,38 @@ async def start_handler(_, m: Message):
 
 @bot.on_message(filters.command(["stop"]))
 async def stop_handler(_, m: Message):
-    user_id = m.from_user.id
-    if user_id in user_tasks:
-        user_tasks[user_id].cancel()
-        del user_tasks[user_id]
+    chat_id = m.chat.id
+    if chat_id in user_tasks:
+        user_tasks[chat_id].cancel()
+        del user_tasks[chat_id]
         await m.reply_text("🛑 **Your task has been stopped!**")
     else:
         await m.reply_text("⚠️ **No active task to stop!**")
 
 @bot.on_message(filters.command(["stopall"]))
 async def stopall_handler(_, m: Message):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user and m.from_user.id != ADMIN_ID:
         await m.reply_text("⛔ **Admin only command!**")
         return
         
     count = 0
-    for user_id, task in list(user_tasks.items()):
+    for chat_id, task in list(user_tasks.items()):
         task.cancel()
-        del user_tasks[user_id]
+        del user_tasks[chat_id]
         count += 1
         
     await m.reply_text(f"🛑 **Stopped {count} tasks!**")
 
 @bot.on_message(filters.command(["upload"]))
 async def upload_handler(bot: Client, m: Message):
-    user_id = m.from_user.id
-    if user_id in user_tasks:
+    chat_id = m.chat.id
+    if chat_id in user_tasks:
         await m.reply_text("⚠️ **You already have an active task! Use /stop first.**")
         return
         
     # Step 1: Get the text file
     msg = await m.reply_text("📤 **Send me the text file containing PDF links**")
-    input_msg = await bot.listen(user_id, timeout=120)
+    input_msg = await bot.listen(chat_id, timeout=120)
     if not input_msg.document or not input_msg.document.file_name.endswith('.txt'):
         await msg.edit("❌ **Invalid file! Please send a TXT file.**")
         return
@@ -125,9 +124,30 @@ async def upload_handler(bot: Client, m: Message):
         await msg.edit(f"❌ **Error reading file:** {str(e)}")
         return
         
-    # Step 2: Get caption
+    # Step 2: Get download range
+    await msg.edit(f"📊 **Total {len(links)} links found**\n\nSend range to download (e.g. '1-10' or '5' for single file):")
+    input_range = await bot.listen(chat_id, timeout=120)
+    try:
+        if '-' in input_range.text:
+            start, end = map(int, input_range.text.split('-'))
+            start = max(1, start)
+            end = min(len(links), end)
+        else:
+            start = end = int(input_range.text)
+            start = max(1, start)
+            end = min(len(links), end)
+        
+        if start > end:
+            start, end = end, start
+            
+        links = links[start-1:end]  # Adjust for 0-based index
+    except:
+        await msg.edit("❌ **Invalid range! Using all files.**")
+    await input_range.delete()
+        
+    # Step 3: Get caption
     await msg.edit("📝 **Enter caption for files**")
-    input_caption = await bot.listen(user_id, timeout=120)
+    input_caption = await bot.listen(chat_id, timeout=120)
     raw_text3 = input_caption.text
     await input_caption.delete()
     
@@ -135,18 +155,16 @@ async def upload_handler(bot: Client, m: Message):
     highlighter = "️ ⁪⁬⁮⁮⁮"
     MR = highlighter if raw_text3 == 'Robin' else raw_text3
     
-    # Step 3: Get thumbnail - FIXED FILTER ISSUE
+    # Step 4: Get thumbnail
     await msg.edit("🖼️ **Send thumbnail photo (type 'no' for no thumbnail)**")
     
-    # Separate handling for photo and text
     try:
-        input_thumb = await bot.listen(user_id, timeout=120)
+        input_thumb = await bot.listen(chat_id, timeout=120)
         thumb = None
         if input_thumb.photo:
             thumb = await input_thumb.download()
         elif input_thumb.text and input_thumb.text.lower() != 'no':
-            await msg.edit("❌ **Invalid input! Please send a photo or type 'no'.**")
-            return
+            await msg.edit("❌ **Invalid input! Using default thumbnail.**")
         await input_thumb.delete()
     except asyncio.TimeoutError:
         await msg.edit("⏱️ **Thumbnail input timed out! Using default thumbnail.**")
@@ -157,26 +175,23 @@ async def upload_handler(bot: Client, m: Message):
     
     # Create and track task
     task = asyncio.create_task(process_links(
-        bot, m, links, MR, thumb, user_id
+        bot, m, links, MR, thumb, chat_id
     ))
-    user_tasks[user_id] = task
-    task.add_done_callback(lambda t: user_tasks.pop(user_id, None))
+    user_tasks[chat_id] = task
+    task.add_done_callback(lambda t: user_tasks.pop(chat_id, None))
 
-async def process_links(bot, m, links, MR, thumb, user_id):
-    """Process all links for a user"""
+async def process_links(bot, m, links, MR, thumb, chat_id):
+    """Process all links for a chat"""
     success = 0
     errors = []
     total = len(links)
-    path = f"./downloads/{user_id}"
+    path = f"./downloads/{chat_id}"
     os.makedirs(path, exist_ok=True)
     
-    # Initialize sequential counter
-    file_counter = 1
-    
     try:
-        for link_data in links:
+        for idx, link_data in enumerate(links, 1):
             # Check if task was cancelled
-            if user_id not in user_tasks:
+            if chat_id not in user_tasks:
                 break
                 
             college = link_data["college"]
@@ -184,12 +199,12 @@ async def process_links(bot, m, links, MR, thumb, user_id):
             batch = link_data["batch"]
             url = link_data["url"]
             
-            # Create caption with sequential counter
+            # Create caption
             #cc1 = f'{str(file_counter).zfill(3)}. **{college}**\n\n`{course}`\n\n__{batch}__\n\n**Downloaded BY {MR}**'
-            cc1 = f'**{str(file_counter).zfill(3)}. {college}**\n\n`{course}`\n\n__{batch}__'
+            cc1 = f'**{idx}. {college}**\n\n`{course}`\n\n__{batch}__'
             
             # Clean filename
-            name = f"{str(file_counter).zfill(3)}_{college}_{course}_{batch}"[:60]
+            name = f"{idx}_{college}_{course}_{batch}"[:60]
             name = re.sub(r'[^\w\s-]', '', name)
             filename = os.path.join(path, f"{name}.pdf")
             
@@ -197,26 +212,21 @@ async def process_links(bot, m, links, MR, thumb, user_id):
             status = await download_pdf(url, filename)
             if not status:
                 errors.append(f"❌ Failed: {college}")
-                # Increment counter even on failure
-                file_counter += 1
                 continue
                 
             # Upload file
             try:
                 await bot.send_document(
-                    chat_id=m.chat.id,
+                    chat_id=chat_id,
                     document=filename,
                     caption=cc1,
-                    thumb=thumb or None  # Handle no thumbnail case
+                    thumb=thumb or None
                 )
                 success += 1
             except FloodWait as e:
                 await asyncio.sleep(e.value + 2)
             except Exception as e:
                 errors.append(f"⚠️ Upload failed: {college} - {str(e)}")
-            
-            # Increment counter after processing
-            file_counter += 1
             
             # Clean up
             if os.path.exists(filename):
@@ -227,7 +237,6 @@ async def process_links(bot, m, links, MR, thumb, user_id):
         if thumb and os.path.exists(thumb):
             os.remove(thumb)
             
-        # Clean up directory
         if os.path.exists(path):
             for file in os.listdir(path):
                 os.remove(os.path.join(path, file))
@@ -238,7 +247,7 @@ async def process_links(bot, m, links, MR, thumb, user_id):
             f"✅ **Process Completed!**\n\n"
             f"• Success: **{success}** files\n"
             f"• Errors: **{len(errors)}** files\n"
-            f"• Total Processed: **{file_counter-1}** files"
+            f"• Total Processed: **{len(links)}** files"
         )
         
         if errors:
@@ -247,7 +256,7 @@ async def process_links(bot, m, links, MR, thumb, user_id):
                 error_log += f"\n\n...and {len(errors)-5} more"
             report += f"\n\n**Errors:**\n{error_log}"
         
-        await m.reply_text(report)
+        await bot.send_message(chat_id, report)
 
 async def health_check(request):
     return web.Response(text="OK")
@@ -262,14 +271,10 @@ async def start_web_server():
     print("Health check server running at http://0.0.0.0:8000/health")
 
 async def main():
-    # Create downloads directory
     os.makedirs("./downloads", exist_ok=True)
-    
     print("Starting PDF Download Bot...")
     await bot.start()
     await start_web_server()
-    
-    # Keep the application running
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
