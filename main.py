@@ -4,18 +4,27 @@ import sys
 import asyncio
 import aiohttp
 import aiofiles
-from vars import API_ID, API_HASH, BOT_TOKEN
 from pyromod import listen
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 
+# Get environment variables directly
+API_ID = int(os.getenv("API_ID", "22182189"))
+API_HASH = os.getenv("API_HASH", "5e7c4088f8e23d0ab61e29ae11960bf5")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+
+# Validate environment variables
+if not BOT_TOKEN:
+    print("BOT_TOKEN environment variable is not set!")
+    sys.exit(1)
+
 # Initialize bot
 bot = Client(
     "pdf_bot",
-    api_id=os.getenv("API_ID"),
-    api_hash=os.getenv("API_HASH"),
-    bot_token=os.getenv("BOT_TOKEN")
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
 )
 
 # User task tracker
@@ -80,8 +89,8 @@ async def upload_handler(bot: Client, m: Message):
     # Step 1: Get the text file
     msg = await m.reply_text("📤 **Send me the text file containing PDF links**")
     input_msg = await bot.listen(user_id, timeout=120)
-    if not input_msg.document:
-        await msg.edit("❌ **No file received. Operation cancelled.**")
+    if not input_msg.document or not input_msg.document.file_name.endswith('.txt'):
+        await msg.edit("❌ **Invalid file! Please send a TXT file.**")
         return
         
     file_path = await input_msg.download()
