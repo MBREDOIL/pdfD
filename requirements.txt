@@ -1,8 +1,7 @@
 pyrogram
 TgCrypto
-aiohttp
-requests
-aiofiles
-pyromod
-fmmpeg
-yt-dlp
+aiohttp==3.9.3
+aiofiles==23.2.1
+pyromod==3.1
+yt-dlp==2023.11.16
+requests==2.31.0
