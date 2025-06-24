@@ -164,7 +164,8 @@ async def process_links(bot, m, links, MR, thumb, user_id):
             url = link_data["url"]
             
             # Create caption with sequential counter
-            cc1 = f'{str(file_counter).zfill(3)}. **{college}**\n\n`{course}`\n\n__{batch}__\n\n**Downloaded BY {MR}**'
+            #cc1 = f'{str(file_counter).zfill(3)}. **{college}**\n\n`{course}`\n\n__{batch}__\n\n**Downloaded BY {MR}**'
+            cc1 = f'**{str(file_counter).zfill(3)}. {college}**\n\n`{course}`\n\n__{batch}__'
             
             # Clean filename
             name = f"{str(file_counter).zfill(3)}_{college}_{course}_{batch}"[:60]
