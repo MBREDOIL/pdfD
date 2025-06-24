@@ -4,6 +4,7 @@ import sys
 import asyncio
 import aiohttp
 import aiofiles
+from vars import API_ID, API_HASH, BOT_TOKEN
 from pyromod import listen
 from pyrogram import Client, filters
 from pyrogram.types import Message
