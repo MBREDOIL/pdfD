@@ -9,6 +9,7 @@ from pyromod import listen
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
+from aiohttp import web
 
 # Get environment variables directly
 API_ID = int(os.getenv("API_ID", "22182189"))
@@ -133,13 +134,22 @@ async def upload_handler(bot: Client, m: Message):
     highlighter = "️ ⁪⁬⁮⁮⁮"
     MR = highlighter if raw_text3 == 'Robin' else raw_text3
     
-    # Step 3: Get thumbnail
-    await msg.edit("🖼️ **Send thumbnail photo or type 'no'**")
-    input_thumb = await bot.listen(user_id, filters=filters.photo | filters.text, timeout=120)
-    thumb = None
-    if input_thumb.photo:
-        thumb = await input_thumb.download()
-    await input_thumb.delete()
+    # Step 3: Get thumbnail - FIXED FILTER ISSUE
+    await msg.edit("🖼️ **Send thumbnail photo (type 'no' for no thumbnail)**")
+    
+    # Separate handling for photo and text
+    try:
+        input_thumb = await bot.listen(user_id, timeout=120)
+        thumb = None
+        if input_thumb.photo:
+            thumb = await input_thumb.download()
+        elif input_thumb.text and input_thumb.text.lower() != 'no':
+            await msg.edit("❌ **Invalid input! Please send a photo or type 'no'.**")
+            return
+        await input_thumb.delete()
+    except asyncio.TimeoutError:
+        await msg.edit("⏱️ **Thumbnail input timed out! Using default thumbnail.**")
+        thumb = None
     
     # Start processing
     await msg.edit(f"⏳ **Starting download of {len(links)} files...**")
@@ -196,7 +206,7 @@ async def process_links(bot, m, links, MR, thumb, user_id):
                     chat_id=m.chat.id,
                     document=filename,
                     caption=cc1,
-                    thumb=thumb
+                    thumb=thumb or None  # Handle no thumbnail case
                 )
                 success += 1
             except FloodWait as e:
@@ -238,9 +248,36 @@ async def process_links(bot, m, links, MR, thumb, user_id):
         
         await m.reply_text(report)
 
-if __name__ == "__main__":
+async def health_check(request):
+    return web.Response(text="OK")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
+    await site.start()
+    print("Health check server running at http://0.0.0.0:8000/health")
+
+async def main():
     # Create downloads directory
     os.makedirs("./downloads", exist_ok=True)
     
     print("Starting PDF Download Bot...")
-    bot.run()
+    await bot.start()
+    await start_web_server()
+    
+    # Keep the application running
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        print("Shutting down...")
+    finally:
+        if bot.is_connected:
+            loop.run_until_complete(bot.stop())
+        loop.close()
