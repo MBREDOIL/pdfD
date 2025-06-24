@@ -1,0 +1,6 @@
+pyrogram
+TgCrypto
+ffmpeg
+yt-dlp
+aiohttp
+requests
